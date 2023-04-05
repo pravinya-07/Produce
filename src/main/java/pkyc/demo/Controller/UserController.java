@@ -40,27 +40,36 @@ public class UserController {
     }
 
     //Added find request with /createdAt
-//    @PostMapping("user/{creation_date}/{last_updated}/{value}")
-//    public String findAll(@PathVariable("creation_date") LocalDateTime creation_date,
-//                   @PathVariable("last_updated") LocalDateTime last_updated,
-//                   @PathVariable("value") int value) {
-//        List<User> list = userRepository.findByDateRange(creation_date, last_updated, value);
-//        for (User user : list) {
-////            @PostMapping(value = "/move",produces = "application/json")
-////            public String moveFile(@RequestParam("key") String key, @RequestParam("sourceFolder") String sourceFolder, @RequestParam("destinationFolder") String destinationFolder) throws
-////            IOException {
-//            // Copy the object from the source folder to the destination folder
-//            CopyObjectRequest copyObjectRequest = new CopyObjectRequest("rpk-custdata-dev", sourceFolder + "/" + key, "rpk-custdata-dev", destinationFolder + "/" + key);
-//            s3Client.copyObject(copyObjectRequest);
-//
-//            // Delete the object from the source folder
-//            s3Client.deleteObject("rpk-custdata-dev", sourceFolder + "/" + key);
-//        }
-//        }
-////    }
-//
-//        // Return a success message
+    @PostMapping("user/{creation_date}/{last_updated}/{value}/{sourceFolder}/{destinationFolder}")
+    public void findAll(@PathVariable("creation_date") LocalDateTime creation_date,
+                   @PathVariable("last_updated") LocalDateTime last_updated,
+                   @PathVariable("value") int value,
+                   @PathVariable("sourceFolder") String sourceFolder,
+                   @PathVariable("destinationFolder") String destinationFolder) {
+        List<User> list = userRepository.findByDateRange(creation_date, last_updated, value);
+        for (User user : list) {
+//            @PostMapping(value = "/move",produces = "application/json")
+//            public String moveFile(@RequestParam("sourceFolder") String sourceFolder, @RequestParam("destinationFolder") String destinationFolder) throws
+//            IOException {
+//             Copy the object from the source folder to the destination folder
+            CopyObjectRequest copyObjectRequest = new CopyObjectRequest("rpk-custdata-dev", sourceFolder + "/" + user.getPanId(), "rpk-custdata-dev", destinationFolder + "/" + user.getPanId());
+            s3Client.copyObject(copyObjectRequest);
+
+            // Delete the object from the source folder
+            s3Client.deleteObject("rpk-custdata-dev", sourceFolder + "/" + user.getPanId());
+
+            System.out.println(user.getPanId());
+        }
+        }
+//    }
+
+        // Return a success message
 //        return "File " + key + " moved successfully!";
+//    @GetMapping("user/{creation_date}/{last_updated}/{value}")
+//    List<User> findAll(@PathVariable("creation_date") LocalDateTime creation_date,
+//                       @PathVariable("last_updated") LocalDateTime last_updated,
+//                       @PathVariable("value") int value) {
+//        return userRepository.findByDateRange(creation_date, last_updated, value);
 //    }
 //    @PostMapping(value = "/move",produces = "application/json")
 //    public String moveFile(@RequestParam("key") String key, @RequestParam("sourceFolder") String sourceFolder, @RequestParam("destinationFolder") String destinationFolder) throws IOException {
