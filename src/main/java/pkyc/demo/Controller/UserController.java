@@ -3,95 +3,99 @@ package pkyc.demo.Controller;
 import com.amazonaws.services.s3.AmazonS3;
 import com.amazonaws.services.s3.model.CopyObjectRequest;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.cloud.aws.messaging.core.QueueMessagingTemplate;
+import org.springframework.messaging.support.MessageBuilder;
 import org.springframework.web.bind.annotation.*;
 import pkyc.demo.Model.User;
 import pkyc.demo.Repositories.UserRepository;
 
 import java.io.IOException;
-import java.time.LocalDateTime;
+import java.time.LocalDate;
 import java.util.List;
+import java.util.logging.Logger;
 import java.util.stream.Collectors;
 
+//Controller to transfer files withing specified date-range and produce records in LOCALSTACK SQS
 @RestController
 public class UserController {
 
+    //    Autowiring userRepository from Repositories package
     @Autowired
     private UserRepository userRepository;
 
+    //    Autowiring queueMessagingTemplate from config package
+    @Autowired
+    private QueueMessagingTemplate queueMessagingTemplate;
+
+    //    taking value of endpoint url from application properties
+    @Value("${cloud.aws.end-point.uri}")
+    private String endPoint;
+
+    //    taking value of bucket-name from application properties
+    @Value("${application.bucket.name}")
+    private String bucketName;
+
+    //    Autowiring AmazonS3 from config package
     @Autowired
     private AmazonS3 s3Client;
 
-    //Added post request with /addUser
-    @PostMapping("/addUser")
-    public User addUser(@RequestBody User user) {
-        return userRepository.save(user);
+
+    //    Post mapping Rest Api for transfering files from one folder to other within same S3
+//    with specified creation-date,last-updated,value(number of records),sourceFolder and destinationFolder
+//    And then produce record in the localstack SQS
+    public String getBucketName() {
+        return bucketName;
     }
 
-    //Added get request with /getAllUser
-    @GetMapping("/getAllUser")
-    public List<User> getAllUser() {
-        return userRepository.findAll();
-    }
+    //    Post mapping Rest Api for transfering files from one folder to other within same S3
+//    with specified creation-date,last-updated,value(number of records),sourceFolder and destinationFolder
+//    And then produce record in the localstack SQS
+    @PostMapping("user/transfer")
+    public String transferFilesAndProcessUsers(
+            @RequestParam("creation_date") LocalDate creationDate,
+            @RequestParam("last_updated") LocalDate lastUpdated,
+            @RequestParam("value") int value,
+            @RequestParam("sourceFolder") String sourceFolder,
+            @RequestParam("destinationFolder") String destinationFolder) {
+        List<User> userList = userRepository.findByDateRange(creationDate, lastUpdated, value);
+        for (User user : userList) {
+            Logger log = Logger.getLogger("pkyc");
+            if (value != 0 && !user.isFileTransferred) {
+                String key = user.getPanId();
+                String prefix = key + ".png";
+                CopyObjectRequest copyObjectRequest = new CopyObjectRequest(
+                        bucketName,
+                        sourceFolder + "/" + prefix,
+                        bucketName,
+                        destinationFolder + "/" + prefix
+                );
 
-    //Added delete request with /deleteAllUser
-    @DeleteMapping("/deleteAllUser")
-    public void deleteAllUser() {
-        userRepository.deleteAll();
-    }
+                // Copy object from the source folder to the destination folder
+                s3Client.copyObject(copyObjectRequest);
 
-    //Added find request with /createdAt
-    @PostMapping("user/{creation_date}/{last_updated}/{value}/{sourceFolder}/{destinationFolder}")
-    public void findAll(@PathVariable("creation_date") LocalDateTime creation_date,
-                   @PathVariable("last_updated") LocalDateTime last_updated,
-                   @PathVariable("value") int value,
-                   @PathVariable("sourceFolder") String sourceFolder,
-                   @PathVariable("destinationFolder") String destinationFolder) {
-        List<User> list = userRepository.findByDateRange(creation_date, last_updated, value);
-        for (User user : list) {
-//            @PostMapping(value = "/move",produces = "application/json")
-//            public String moveFile(@RequestParam("sourceFolder") String sourceFolder, @RequestParam("destinationFolder") String destinationFolder) throws
-//            IOException {
-//             Copy the object from the source folder to the destination folder
-            CopyObjectRequest copyObjectRequest = new CopyObjectRequest("rpk-custdata-dev", sourceFolder + "/" + user.getPanId(), "rpk-custdata-dev", destinationFolder + "/" + user.getPanId());
-            s3Client.copyObject(copyObjectRequest);
+                // Delete the object from the source folder
+                s3Client.deleteObject(bucketName, sourceFolder + "/" + prefix);
 
-            // Delete the object from the source folder
-            s3Client.deleteObject("rpk-custdata-dev", sourceFolder + "/" + user.getPanId());
+                // Set the flag to indicate file transfer
+                user.setIsFileTransferred(true);
+                userRepository.save(user);
 
-            System.out.println(user.getPanId());
+//                Send message to SQS queue
+                String message = "File transfer completed for user: " + user.getUserId();
+                queueMessagingTemplate.send(endPoint, MessageBuilder.withPayload(message).build());
+            } else {
+                log.info("Please enter a positive value.");
+            }
         }
-        }
-//    }
-
-        // Return a success message
-//        return "File " + key + " moved successfully!";
-//    @GetMapping("user/{creation_date}/{last_updated}/{value}")
-//    List<User> findAll(@PathVariable("creation_date") LocalDateTime creation_date,
-//                       @PathVariable("last_updated") LocalDateTime last_updated,
-//                       @PathVariable("value") int value) {
-//        return userRepository.findByDateRange(creation_date, last_updated, value);
-//    }
-//    @PostMapping(value = "/move",produces = "application/json")
-//    public String moveFile(@RequestParam("key") String key, @RequestParam("sourceFolder") String sourceFolder, @RequestParam("destinationFolder") String destinationFolder) throws IOException {
-//        // Copy the object from the source folder to the destination folder
-//        CopyObjectRequest copyObjectRequest = new CopyObjectRequest("rpk-custdata-dev", sourceFolder + "/" + key, "rpk-custdata-dev", destinationFolder + "/" + key);
-//        s3Client.copyObject(copyObjectRequest);
-//
-//        // Delete the object from the source folder
-//        s3Client.deleteObject("rpk-custdata-dev", sourceFolder + "/" + key);
-//
-//        // Return a success message
-//        return "File "+key+" moved successfully!";
-//    }
-
-    @GetMapping("/list")
-    public List<String> listObjects(@RequestParam("prefix") String prefix) {
-        // List all objects in the specified folder with the specified prefix
-        List<String> objectKeys = s3Client.listObjects("rpk-custdata-dev", prefix).getObjectSummaries().stream()
-                .map(s3ObjectSummary -> s3ObjectSummary.getKey())
-                .collect(Collectors.toList());
-        System.out.println("Objects in " + prefix + " are " + objectKeys);
-        // Return the list of object keys
-        return objectKeys;
+        return "File transfer for the selected date range completed successfully.";
     }
+
 }
+
+
+
+
+
+
+
